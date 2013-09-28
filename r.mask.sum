@@ -1,0 +1,66 @@
+#!/usr/bin/env python
+# vim: ft=python
+
+#%module
+#% description: creates a series based on input and multiple category masks
+#% keywords: raster, mask
+#%end
+#%option
+#%  key: rast
+#%  type: string
+#%  description: one or more input raster layers
+#%  required: yes
+#%end
+#%option
+#%  key: mask
+#%  type: string
+#%  description: mask layer
+#%  required: yes
+#%end
+#%option
+#%  key: maskcats
+#%  type: string
+#%  description: comma seperated list of maskcats
+#%  required: yes
+#%end
+
+import sys, os
+import atexit
+
+try:
+    import grass.script as grass
+except:
+    sys.stderr.write('Error: must be running under GRASS\n')
+    sys.exit(1)
+
+
+def _clear_mask():
+    grass.run_command('r.mask', flags='r', quiet=True)
+
+def _maskcats(maskcats):
+    """_maskcats - converts from sane form to r.mask form"""
+    return maskcats.replace('-',' thru ')
+
+def getSeries(layer, mask, maskcats):
+
+    series = []
+    for cats in maskcats:
+        grass.run_command('r.mask', flags='o', _input=mask,
+               maskcats=_maskcats(cats), quiet=True)
+        d = grass.parse_command('r.sum', rast=layer, quiet=True)
+        series.append(d['SUM'].strip())
+    return series
+    
+
+def main():
+
+    for r in options['rast'].split(','):
+        s = getSeries(r, options['mask'], options['maskcats'].split(','))
+        print r, s
+
+
+if __name__ == '__main__':
+     options, flags = grass.parser()
+     atexit.register(_clear_mask)
+     main()
+

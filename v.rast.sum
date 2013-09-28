@@ -1,0 +1,96 @@
+#!/usr/bin/env python
+
+import os,sys
+import math
+from optparse import OptionParser
+import pdb
+
+def get_sum(zonerast, input):
+
+    zones = {}
+    for l in os.popen('r.stats --q -c input=%s,%s' % (zonerast, input)):
+        if l.find('*') != -1: continue
+        zid, value, count = l.split()
+        zones[zid] = zones.setdefault(zid, 0.0) + int(value) * int(count)
+
+    return zones
+
+
+def grass_parse(args):
+
+    d = {}
+    for a in args:
+        k,v = a.split('=')
+        if ',' in v:
+            d[k] = v.split(',')
+        else:
+            d[k] = v
+
+    return d
+
+
+def main():
+
+    # parse command line
+    usage = 'Usage: %prog [options] zones=map input=map column=name'
+    p = OptionParser(usage=usage)
+    p.add_option('-f', '--force', dest='makerast',
+                 action='store_true', default=False,
+                 help='force the rasteration of the zonemap')
+    (opts, args) = p.parse_args()
+    args = grass_parse(args)
+
+    # check for required command arguments
+    if not args.has_key('zones'):
+        sys.stderr.write('Error: zones map required.\n')
+        p.print_help()
+        sys.exit(1)
+    elif not args.has_key('input'):
+        sys.stderr,write('Error: input map required.\n')
+        p.print_help()
+        sys.exit(1)
+    elif not args.has_key('column'):
+        sys.stderr.write('Error: column name required.\n')
+        p.print_help()
+        sys.exit(1)
+
+    zonemap = args['zones']
+    input = args['input']
+    colname = args['column']
+        
+    mapset = os.popen("g.gisenv get=MAPSET").read().strip()
+
+    # checks for the existance of rast map matching zone map
+    rastexists = os.popen("g.mlist type=rast pattern=%s" % zonemap).read()
+    if len(rastexists) == 0 or opts.makerast:
+        os.system("v.to.rast --quiet input=%s output=%s use=cat" % 
+                  (zonemap,zonemap))
+
+    # check type of input map, if it's a floating-point then
+    # perform calculation with fixed-point raster map instead
+    type = os.popen("r.info -t %s" % input).read()
+    if type.find("DCELL") > -1 or type.find("FCELL") > -1:
+        os.system('r.mapcalc "tmpxx=int(%s*1000)"' % input)
+        input = 'tmpxx'
+
+    # add the column to the zonemap
+    os.system("v.db.dropcol map=%s column=%s >/dev/null 2>&1" 
+               % (zonemap, colname))
+    os.system("v.db.addcol map=%s columns='%s DOUBLE'" % (zonemap, colname))
+    os.system("v.db.update map=%s column=%s value=0" % (zonemap, colname))
+
+    counts = get_sum(zonemap, input)
+    dbf = os.popen("db.execute", "wb")
+    for k,v in counts.iteritems():
+        dbf.write("UPDATE %s SET %s=%s WHERE cat=%s;\n" % \
+                 (zonemap, colname, v, k)) 
+    dbf.close()
+
+    if input == 'tmpxx':
+        os.system("v.db.update %s column=%s value='%s/1000'" % \
+                  (zonemap, colname, colname))
+        os.system("g.remove --q rast=%s" % input)
+
+
+if __name__ == "__main__":
+    main()
