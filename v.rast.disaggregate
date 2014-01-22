@@ -1,0 +1,115 @@
+#!/usr/bin/env python
+# vim: ft=python
+
+############################################################################
+#
+# MODULE:       v.rast.disaggregate
+# AUTHOR(S):    Jeff Terstriep
+#
+# PURPOSE:      Disaggregates a vector value on to a raster layer
+#               based on weights provided by an input raster
+#               of categories and produces a series.
+#
+# COPYRIGHT:    (C) 2012 LEAMgroup, Inc.
+#
+#       This program is free software under the GNU General Public
+#       License (>=v2). Read the file COPYING that comes with GRASS
+#       for details.
+#
+#############################################################################
+
+#%module
+#% description: disaggregates a zonal value using a weighted raster
+#% keywords: vector, raster
+#%end
+
+#%flag
+#%  key: a
+#%  description: ALL flag, uses uniform distribution when necessary
+#%end
+
+#%option
+#%  key: input
+#%  type: string
+#%  description: a zonal vector layer
+#%  required: yes
+#%end
+
+#%option
+#%  key: layer
+#%  type: integer
+#%  description: the input vector maps layer (optional)
+#%  required: no
+#%  answer: 1
+#%end
+
+#%option
+#%  key: column
+#%  type: string
+#%  description: attribute to be disaggregated
+#%  required: yes
+#%end
+
+#%option
+#%  key: weights
+#%  type: string
+#%  description: raster providing weights
+#%  required: yes
+#%end
+
+#%option
+#%  key: output
+#%  type: string
+#%  description: output raster map
+#%  required: yes
+#%end
+
+import os, sys
+
+try:
+    from grass.script import core as grass
+except ImportError:
+    print "Error: must be running under GRASS"
+    sys.exit(1)
+
+
+def calcUnitWeight(vect, val, weights, out, wcol=None):
+    """ sum the total of weighted cells in each polygon, compute
+        the unit value (where possible), and write to raster
+
+        vect    = input vector map
+        val     = vector map attribute with desired value
+        weights = input rast map with cell weights
+        out     = output raster map
+        wcol    = weight column in vect (default=name of output raster)
+                  deleted prior to function return
+    """
+    if not wcol:
+        wcol = out
+
+    grass.run_command('v.rast.sum', zones=vect, _input=weights, column=wcol)
+    grass.run_command('v.db.update', column=wcol, value=val+'/'+wcol,
+                      where='wcol>0')
+    grass.run_command('v.to.rast', _input=vect, use='attr', 
+                      column=wcol, output=out)
+    grass.run_command('v.db.dropcol', input=vect, column=wcol)
+
+
+def main():
+
+    calcUnitWeight(options['input', options['column'], options['weights'],
+                       options['output'])
+
+    # if the ALL flag is set then ensure the output includes a uniform
+    # distribution for zones with numeric value but no weighted cells
+    if flags['a']:
+        grass.mapcalc('w_alt=1.0')
+        calcUnitWeight(options['input', options['column'], 'w_alt', 'w_alt')
+        grass.mapcalc('$out=if($out,$out,w_alt)',out=options['output']
+        
+    return 0
+
+if __name__ == '__main__':
+    options, flags = grass.parser()
+    sys.exit(main())
+
